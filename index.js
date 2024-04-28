@@ -4,6 +4,7 @@ const moment = require("moment");
 const fs = require("fs");
 const path = require("path");
 const dotenv = require("dotenv");
+const { get } = require("http");
 require('dotenv').config();
 
 const PRIVATE_TOKEN = process.env.PRIVATE_TOKEN;
@@ -113,6 +114,7 @@ async function writeMergeRequestsToExcel(response) {
     { header: "Дата", key: "date" },
     { header: "Исполнитель", key: "executor" },
     { header: "Ветка", key: "branch" },
+    { header: "Тип задачи", key: "task_type" },
   ];
 
   const filteredData = response.data.filter((item) => {
@@ -127,6 +129,7 @@ async function writeMergeRequestsToExcel(response) {
       date: moment(item.merged_at).format("DD.MM.YYYY HH:mm:ss"),
       executor: item.author.name,
       branch: item.source_branch,
+      task_type: getTaskType(item.source_branch),
     });
   });
 
@@ -134,6 +137,18 @@ async function writeMergeRequestsToExcel(response) {
     await workbook.xlsx.writeFile("output.xlsx");
   } catch (error) {
     logError(error);
+  }
+}
+
+function getTaskType(branch) {
+  if (branch.includes("feat")) {
+    return "Feature";
+  } else if (branch.includes("bug")) {
+    return "Bugfix";
+  } else if (branch.includes("hotfix")) {
+    return "Hotfix";
+  } else {
+    return "Unknown";
   }
 }
 
