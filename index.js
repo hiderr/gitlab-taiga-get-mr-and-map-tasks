@@ -5,7 +5,7 @@ const fs = require("fs");
 const path = require("path");
 const dotenv = require("dotenv");
 const { get } = require("http");
-require('dotenv').config();
+require("dotenv").config();
 
 const PRIVATE_TOKEN = process.env.PRIVATE_TOKEN;
 const TAIGA_USERNAME = process.env.TAIGA_USERNAME;
@@ -124,13 +124,35 @@ async function writeMergeRequestsToExcel(response) {
     );
   });
 
-  filteredData.forEach((item) => {
-    worksheet.addRow({
-      date: moment(item.merged_at).format("DD.MM.YYYY HH:mm:ss"),
-      executor: item.author.name,
-      branch: item.source_branch,
-      task_type: getTaskType(item.source_branch),
+  // Группировка данных по исполнителю
+  const groupedData = filteredData.reduce((groups, item) => {
+    const key = item.author.name;
+    if (!groups[key]) {
+      groups[key] = [];
+    }
+    groups[key].push(item);
+    return groups;
+  }, {});
+
+  // Проходим по каждой группе
+  Object.keys(groupedData).forEach((executor) => {
+    // Сортировка данных в группе по дате в убывающем порядке
+    const sortedData = groupedData[executor].sort(
+      (a, b) => new Date(b.merged_at) - new Date(a.merged_at)
+    );
+
+    // Добавление данных в Excel
+    sortedData.forEach((item) => {
+      worksheet.addRow({
+        date: moment(item.merged_at).format("DD.MM.YYYY HH:mm:ss"),
+        executor: item.author.name,
+        branch: item.source_branch,
+        task_type: getTaskType(item.source_branch),
+      });
     });
+
+    // Добавление пустой строки между группами
+    worksheet.addRow({});
   });
 
   try {
@@ -144,9 +166,11 @@ function getTaskType(branch) {
   if (branch.includes("feat")) {
     return "Feature";
   } else if (branch.includes("bug")) {
-    return "Bugfix";
+    return "Bug";
   } else if (branch.includes("hotfix")) {
     return "Hotfix";
+  } else if (branch.includes("us")) {
+    return "Userstory";
   } else {
     return "Unknown";
   }
