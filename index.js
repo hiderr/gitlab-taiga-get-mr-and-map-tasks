@@ -3,11 +3,13 @@ const ExcelJS = require("exceljs");
 const moment = require("moment");
 const fs = require("fs");
 const path = require("path");
-const dotenv = require("dotenv");
-const { get } = require("http");
+const dotenv = require("dotenv");å
 require("dotenv").config();
 
+const GITLAB_HOST = process.env.GITLAB_HOST;
+const GITLAB_PROJECT_ID = process.env.GITLAB_PROJECT_ID;
 const PRIVATE_TOKEN = process.env.PRIVATE_TOKEN;
+const TAIGA_URL = process.env.TAIGA_URL;
 const TAIGA_USERNAME = process.env.TAIGA_USERNAME;
 const TAIGA_PASSWORD = process.env.TAIGA_PASSWORD;
 const TAIGA_AUTH_TOKEN = process.env.TAIGA_AUTH_TOKEN;
@@ -65,8 +67,8 @@ async function authenticateAndGetTokenFromTaiga(data) {
 }
 
 function updateEnvFileWithAuthTokenFromTaiga(authToken) {
-  const envConfig = dotenv.parse(fs.readFileSync(".env")); // read .env file
-  envConfig.TAIGA_AUTH_TOKEN = authToken; // update auth token
+  const envConfig = dotenv.parse(fs.readFileSync(".env"));
+  envConfig.TAIGA_AUTH_TOKEN = authToken;
 
   let envContent = "";
   for (let key in envConfig) {
@@ -88,7 +90,7 @@ async function getMergeRequestsAndWriteToExcel() {
   try {
     const response = await axios({
       method: "get",
-      url: "https://gitlab.byhelp.ru/api/v4/projects/6/merge_requests",
+      url: `${GITLAB_HOST}api/v4/projects/${GITLAB_PROJECT_ID}/merge_requests`,
       headers: {
         "PRIVATE-TOKEN": PRIVATE_TOKEN,
       },
@@ -111,10 +113,12 @@ async function writeMergeRequestsToExcel(response) {
   const worksheet = workbook.addWorksheet("Merge Requests");
 
   worksheet.columns = [
-    { header: "Дата", key: "date" },
+    { header: "Дата", key: "merged_at" },
+    { header: "MR создан", key: "created_at" },
     { header: "Исполнитель", key: "executor" },
     { header: "Ветка", key: "branch" },
     { header: "Тип задачи", key: "task_type" },
+    { header: "Ссылка на задачу", key: "task_url" },
   ];
 
   const filteredData = response.data.filter((item) => {
@@ -134,22 +138,24 @@ async function writeMergeRequestsToExcel(response) {
     return groups;
   }, {});
 
-  // Проходим по каждой группе
-  Object.keys(groupedData).forEach((executor) => {
+  Object.keys(groupedData).forEach(async (executor) => {
     // Сортировка данных в группе по дате в убывающем порядке
     const sortedData = groupedData[executor].sort(
       (a, b) => new Date(b.merged_at) - new Date(a.merged_at)
     );
 
     // Добавление данных в Excel
-    sortedData.forEach((item) => {
+    for (const item of sortedData) {
+      const link = `${TAIGA_URL}${formatBranchNameToTaigaUrlEnd(item.source_branch)}`;
       worksheet.addRow({
-        date: moment(item.merged_at).format("DD.MM.YYYY HH:mm:ss"),
+        merged_at: moment(item.merged_at).format("DD.MM.YYYY HH:mm:ss"),
+        created_at: moment(item.created_at).format("DD.MM.YYYY HH:mm:ss"),
         executor: item.author.name,
         branch: item.source_branch,
         task_type: getTaskType(item.source_branch),
+        task_url: `=HYPERLINK("${link}")`,
       });
-    });
+    }
 
     // Добавление пустой строки между группами
     worksheet.addRow({});
@@ -159,6 +165,19 @@ async function writeMergeRequestsToExcel(response) {
     await workbook.xlsx.writeFile("output.xlsx");
   } catch (error) {
     logError(error);
+  }
+}
+
+async function getBranchCreationDate(branchName) {
+  try {
+    const response = await axios.get(
+      `${GITLAB_HOST}api/v4/projects/${GITLAB_PROJECT_ID}/repository/commits?ref_name=${branchName}`
+    );
+    const commits = response.data;
+    const firstCommit = commits[commits.length - 1];
+    return firstCommit.created_at;
+  } catch (error) {
+    console.error(error);
   }
 }
 
@@ -174,6 +193,22 @@ function getTaskType(branch) {
   } else {
     return "Unknown";
   }
+}
+
+function formatBranchNameToTaigaUrlEnd(branchName) {
+  const branch = branchName.replace("-", "/");
+  const [sourceTaskType, taskNumber] = branch.split("/");
+  let taskType = "";
+  if (sourceTaskType.includes("bug") || branch.includes("hotfix")) {
+    taskType = "issue";
+  } else if (branch.includes("feat")) {
+    taskType = "task";
+  } else if (branch.includes("us")) {
+    taskType = "us";
+  } else {
+    taskType = "";
+  }
+  return `${taskType}/${taskNumber}`;
 }
 
 async function logError(error) {
