@@ -3,7 +3,7 @@ const ExcelJS = require("exceljs");
 const moment = require("moment");
 const fs = require("fs");
 const path = require("path");
-const dotenv = require("dotenv");å
+const dotenv = require("dotenv");
 require("dotenv").config();
 
 const GITLAB_HOST = process.env.GITLAB_HOST;
